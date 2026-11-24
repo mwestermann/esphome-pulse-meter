@@ -161,8 +161,18 @@ before it flashes anything.
 
 ### Add it to Home Assistant
 
-Home Assistant discovers the device under **Settings → Devices & services**. Enter the
-`api_encryption_key` from `secrets.yaml`.
+Home Assistant usually discovers the device under **Settings → Devices & services**. If it
+doesn't (mDNS blocked, different VLAN), add it manually: **Add integration → ESPHome**, enter the
+device's IP address and port `6053`. Then enter the `api_encryption_key` from `secrets.yaml`.
+To copy it without showing it on screen (macOS):
+
+```bash
+grep '^api_encryption_key' secrets.yaml | cut -d'"' -f2 | tr -d '\n' | pbcopy
+```
+
+**Energy dashboard:** if the meter you read is a *sub-meter* (e.g. heat pump, EV charger) behind
+your main meter, add Energy (and Power) under **Individual electrical devices**, not under
+*Electricity grid*. Otherwise the consumption is counted twice. Only a main meter goes under grid.
 
 | Entity | Unit | Notes |
 |--------|------|-------|
@@ -209,6 +219,17 @@ How to read the result:
   Call the action again with a fresh reading.
 - **Home Assistant counts less**: lower `pulse_filter` to `5ms`, check the sensor alignment.
 - **Home Assistant counts more**: light leaks or the trimpot is too close to its threshold. "Rejected pulses" will often be climbing.
+
+### 3. Re-calibrating later
+
+Once Energy is in the Energy dashboard, every re-calibration shows up in the statistics:
+
+- **Moving the total up by Δ** is booked as Δ kWh consumption in that hour.
+- **Moving it down by a small Δ** is ignored by Home Assistant (treated as a glitch, not a reset),
+  so consumption stays Δ too high.
+
+Fix either in **Developer tools → Statistics**. Only re-calibrate if the deviation is clearly
+larger than the display's resolution (e.g. ≥ 0.02 kWh on a 2-decimal display).
 
 If you use Claude Code, send it both photos with their times. It can read the device log and do the
 comparison for you.
