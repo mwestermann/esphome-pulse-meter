@@ -1,0 +1,178 @@
+# esphome-pulse-meter — count the LED pulses of an electricity meter with an ESP32
+# and an LM393 light-sensor module, and report power (W) and energy (kWh) to Home Assistant.
+#
+# Adjust the substitutions below to YOUR meter. See README.md and PROMPT.md.
+
+substitutions:
+  name: pulse-meter
+  friendly_name: Pulse meter
+  # GPIO connected to the LM393 module's DO (digital out) pin.
+  pulse_pin: GPIO26
+  # Meter constant printed on the meter, e.g. "1000 imp/kWh".
+  pulse_rate: "1000"
+  # Shortest possible time between two LED pulses on your meter (ms).
+  # Use the meter datasheet if it states one; otherwise
+  #   3,600,000 / (pulse_rate * max_kW_of_installation), minus ~10 %.
+  # Example: 1000 imp/kWh, 3 x 230 V x 25 A = 17.25 kW -> 208 ms -> use ~190.
+  min_period_ms: "90"
+  # Power readings above this (W) are discarded. Set it to the physical maximum
+  # of the circuit (fuse/breaker), e.g. 3 x 230 V x 40 A = 27,600 W.
+  max_power_w: "20000"
+  # Pulses shorter than this are ignored (removes bounce and comparator chatter).
+  # Must be shorter than your meter's LED on-time. 10 ms works for most meters;
+  # lower to 5 ms if the device counts fewer pulses than the meter.
+  pulse_filter: 10ms
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+  level: DEBUG
+
+# Batch flash writes: the total is written at most every 5 minutes (and on
+# reboot/OTA). A power cut can lose up to 5 minutes of pulses.
+preferences:
+  flash_write_interval: 5min
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+  actions:
+    # Set the total to the reading on the meter's display.
+    # In Home Assistant: Developer tools -> Actions -> esphome.<name>_set_meter_reading
+    - action: set_meter_reading
+      variables:
+        kwh: float
+      then:
+        - lambda: |-
+            if (!(kwh >= 0.0f) || kwh > 10000000.0f) {
+              ESP_LOGW("calibration", "Rejected unrealistic meter reading: %.3f kWh", kwh);
+              return;
+            }
+            id(pulses_total) = (uint64_t) llround((double) kwh * ${pulse_rate});
+            ESP_LOGI("calibration", "Meter reading set to %.3f kWh", kwh);
+            id(energy).publish_state(id(pulses_total) / (double) ${pulse_rate});
+        # Let globals store the value (1 s poll), then write to flash immediately.
+        - delay: 2s
+        - lambda: global_preferences->sync();
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "${name} fallback"
+    password: !secret ap_password
+
+captive_portal:
+
+globals:
+  # Accepted pulses since calibration. Restored after reboot.
+  - id: pulses_total
+    type: uint64_t
+    restore_value: true
+    initial_value: "0"
+  # Last value of pulse_meter's own total (pulses since boot).
+  - id: last_meter_total
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+  # millis() of the last pulse seen, accepted or rejected (0 = none yet).
+  - id: last_seen_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+  - id: rejected_count
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+
+sensor:
+  - platform: pulse_meter
+    id: power
+    name: "Power"
+    pin:
+      number: ${pulse_pin}
+      mode:
+        input: true
+        # Keeps the pin low when no sensor is connected (no ghost pulses at boot).
+        pulldown: true
+    internal_filter: ${pulse_filter}
+    # PULSE: the signal must stay stable for internal_filter before it counts.
+    # Each LED flash is then counted once, whatever the module's output polarity.
+    internal_filter_mode: PULSE
+    timeout: 2min
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    filters:
+      # pulses/min -> W
+      - lambda: |-
+          const float w = x * 60000.0f / ${pulse_rate};
+          if (w > ${max_power_w}) return {};
+          return w;
+    total:
+      id: meter_total
+      internal: true
+      on_value:
+        then:
+          - lambda: |-
+              const uint32_t total = (uint32_t) x;
+              uint32_t delta = total - id(last_meter_total);
+              id(last_meter_total) = total;
+              if (delta == 0) return;
+              const uint32_t now = millis();
+              // Hold-off is restarted by EVERY pulse (also rejected ones), so
+              // sustained noise faster than min_period_ms is rejected entirely.
+              uint32_t allowed;
+              if (id(last_seen_ms) == 0) {
+                allowed = 1;
+              } else {
+                allowed = (now - id(last_seen_ms)) / ${min_period_ms};
+              }
+              id(last_seen_ms) = now == 0 ? 1 : now;
+              const uint32_t accepted = delta < allowed ? delta : allowed;
+              const uint32_t rejected = delta - accepted;
+              if (rejected > 0) {
+                id(rejected_count) += rejected;
+                ESP_LOGW("pulse", "Rejected %u pulse(s) (< ${min_period_ms} ms)", (unsigned) rejected);
+              }
+              if (accepted > 0) {
+                id(pulses_total) += accepted;
+                id(energy).publish_state(id(pulses_total) / (double) ${pulse_rate});
+              }
+
+  - platform: template
+    id: energy
+    name: "Energy"
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 3
+    update_interval: 60s
+    lambda: return id(pulses_total) / (double) ${pulse_rate};
+
+  - platform: template
+    name: "Rejected pulses"
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    state_class: total_increasing
+    update_interval: 60s
+    lambda: return id(rejected_count);
+
+  - platform: wifi_signal
+    name: "WiFi signal"
+    update_interval: 60s
+
+  - platform: uptime
+    name: "Uptime"
