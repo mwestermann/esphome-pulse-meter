@@ -70,7 +70,7 @@ wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
   ap:
-    ssid: "${name} fallback"
+    ssid: "${name}-ap"
     password: !secret ap_password
 
 captive_portal:

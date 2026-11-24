@@ -170,6 +170,12 @@ To copy it without showing it on screen (macOS):
 grep '^api_encryption_key' secrets.yaml | cut -d'"' -f2 | tr -d '\n' | pbcopy
 ```
 
+**Give it a fixed IP.** If you added the device by IP address, reserve that address in your
+router's DHCP (e.g. UniFi: client → Settings → *Fixed IP Address*). Otherwise a new lease breaks
+the connection. If you change the address later, the device only picks it up after reconnecting.
+Then update Home Assistant via **ESPHome → ⋮ → Reconfigure** with the new IP. Entities and
+statistics are kept, because the device is identified by its MAC address.
+
 **Energy dashboard:** if the meter you read is a *sub-meter* (e.g. heat pump, EV charger) behind
 your main meter, add Energy (and Power) under **Individual electrical devices**, not under
 *Electricity grid*. Otherwise the consumption is counted twice. Only a main meter goes under grid.
@@ -246,6 +252,9 @@ comparison for you.
 | Power shows 0 W although the meter flashes | Sensor misaligned, or trimpot set so DO never switches. Watch the DO LED. |
 | Counts too many, "Rejected pulses" climbing | Trimpot near threshold, or stray light. Shield the sensor. |
 | Counts too few | LED on-time shorter than `pulse_filter`. Try `5ms`. |
+| Old name (e.g. `home-assistant-glow-xxxxxx`) still shows in the router or Home Assistant after replacing Glow | The router picks up the new hostname on the next DHCP lease. In Home Assistant, rename the router integration's leftover device and entity (e.g. UniFi's device tracker) under **Settings → Devices**. |
+| `SSID can't be longer than 32 characters` when compiling | The fallback AP is named `<name>-ap`. Keep `name` at 29 characters or less. |
+| Calibration action name changed after renaming | The action follows the device name (`esphome.<name>_set_meter_reading`). The old name disappears after a Home Assistant restart. |
 | Total lower after a power cut | Expected: up to 5 min of pulses since the last flash write can be lost. Recalibrate if needed. |
 
 Logs over WiFi:
