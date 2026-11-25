@@ -242,6 +242,20 @@ comparison for you.
 
 ---
 
+## Test results
+
+Tested on a Carlo Gavazzi EM340 sub-meter (1000 imp/kWh) for a heat pump. The meter's display shows
+two decimals, so every reading has an uncertainty of ±0.005 kWh.
+
+| Date | Interval | Display increase | Home Assistant increase | Difference | Rejected pulses |
+|------|----------|------------------|-------------------------|------------|-----------------|
+| 2026-11-24 | 17:40:47–18:01:30 (21 min) | +0.25 | +0.241 | within resolution | 0 |
+| 2026-11-24 | 18:05–23:16:27 (5 h) | +2.847 | +2.847 | 0 | 0 |
+| 2026-11-24/25 | 18:05–07:45:23 (13.7 h) | +6.227 | +6.228 | 0.001 kWh (1 pulse) | 0 |
+
+The total was calibrated to the display at 18:05 on 2026-11-24 and has not been adjusted since.
+Results from other meters are welcome as issues or PRs.
+
 ## Troubleshooting
 
 | Symptom | Likely cause / fix |
